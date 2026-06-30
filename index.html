@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ひらがな画像メーカー</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: #f7f4ef;
+      font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: #222;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 2rem 2.5rem;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.07);
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+
+    label {
+      font-size: 0.85rem;
+      color: #666;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      font-size: 1.5rem;
+      border: 2px solid #e0dbd2;
+      border-radius: 10px;
+      outline: none;
+      color: #222;
+      background: #faf9f7;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+
+    input[type="text"]:focus {
+      border-color: #4a7c59;
+    }
+
+    button {
+      padding: 0.8rem 1.5rem;
+      background: #4a7c59;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      font-family: inherit;
+    }
+
+    button:hover { background: #3a6347; }
+    button:active { transform: scale(0.97); }
+
+    #preview-area {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    #preview-area.visible { display: flex; }
+
+    #canvas-container {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid #e0dbd2;
+      background: #faf9f7;
+      max-width: 100%;
+    }
+
+    canvas { display: block; max-width: 100%; }
+
+    #download-btn {
+      background: #2b5fa6;
+      width: 100%;
+    }
+    #download-btn:hover { background: #1e4a85; }
+
+    #error-msg {
+      color: #c0392b;
+      font-size: 0.85rem;
+      min-height: 1.2em;
+    }
+
+    #unknown-chars {
+      font-size: 0.8rem;
+      color: #999;
+      min-height: 1em;
+    }
+  </style>
+</head>
+<body>
+
+<h1>ひらがな画像メーカー</h1>
+
+<div class="card">
+  <label for="text-input">ひらがなを入力してください</label>
+  <input type="text" id="text-input" placeholder="やました" maxlength="20">
+  <div id="error-msg"></div>
+  <button id="generate-btn">画像を生成</button>
+
+  <div id="preview-area">
+    <div id="canvas-container">
+      <canvas id="output-canvas"></canvas>
+    </div>
+    <div id="unknown-chars"></div>
+    <button id="download-btn">ダウンロード</button>
+  </div>
+</div>
+
+<script>
+  // ひらがなごとのバリエーション数
+  const variants = {
+    'あ': 1, 'い': 13, 'う': 3,  'え': 1,  'お': 1,
+    'か': 11,'き': 5,  'く': 1,  'こ': 1,
+    'さ': 7, 'し': 16, 'す': 12, 'せ': 1,
+    'た': 14,'つ': 9,  'て': 18, 'と': 4,
+    'な': 12,'に': 8,  'ね': 1,  'の': 7,
+    'は': 9, 'ふ': 1,
+    'ま': 7, 'み': 1,  'む': 1,  'め': 1,  'も': 4,
+    'よ': 2,
+    'ら': 1, 'り': 6,  'る': 6,  'れ': 4,
+    'わ': 1, 'を': 6,  'ん': 5,
+  };
+
+  const IMAGE_FOLDER = 'images/';
+  const CHAR_HEIGHT = 200; // canvas上の高さ(px)。実画像サイズに合わせて調整
+
+  function getRandomVariant(char) {
+    const max = variants[char];
+    if (!max) return null;
+    return Math.floor(Math.random() * max) + 1;
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`画像読み込み失敗: ${src}`));
+      img.src = src;
+    });
+  }
+
+  async function generate() {
+    const input = document.getElementById('text-input').value.trim();
+    const errorMsg = document.getElementById('error-msg');
+    const previewArea = document.getElementById('preview-area');
+    const unknownDiv = document.getElementById('unknown-chars');
+
+    errorMsg.textContent = '';
+    unknownDiv.textContent = '';
+    previewArea.classList.remove('visible');
+
+    if (!input) {
+      errorMsg.textContent = 'ひらがなを入力してください。';
+      return;
+    }
+
+    const chars = [...input]; // Unicode対応のため展開
+    const unknown = chars.filter(c => !(c in variants));
+    if (unknown.length > 0) {
+      errorMsg.textContent = `対応していない文字が含まれています: ${[...new Set(unknown)].join(' ')}`;
+      return;
+    }
+
+    // 画像パスを決定
+    const paths = chars.map(c => {
+      const n = getRandomVariant(c);
+      return `${IMAGE_FOLDER}${c}${n}.png`;
+    });
+
+    // 全画像を読み込む
+    let imgs;
+    try {
+      imgs = await Promise.all(paths.map(loadImage));
+    } catch (e) {
+      errorMsg.textContent = e.message;
+      return;
+    }
+
+    // スケールを揃えてcanvasに描画（高さ統一、幅は比率維持）
+    const H = CHAR_HEIGHT;
+    const widths = imgs.map(img => Math.round(img.width * H / img.height));
+    const totalW = widths.reduce((a, b) => a + b, 0);
+
+    const canvas = document.getElementById('output-canvas');
+    canvas.width = totalW;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, totalW, H);
+
+    let x = 0;
+    imgs.forEach((img, i) => {
+      ctx.drawImage(img, x, 0, widths[i], H);
+      x += widths[i];
+    });
+
+    previewArea.classList.add('visible');
+  }
+
+  document.getElementById('generate-btn').addEventListener('click', generate);
+  document.getElementById('text-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') generate();
+  });
+
+  document.getElementById('download-btn').addEventListener('click', () => {
+    const canvas = document.getElementById('output-canvas');
+    const input = document.getElementById('text-input').value.trim();
+    const link = document.createElement('a');
+    link.download = `${input}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+</script>
+
+</body>
+</html>
